@@ -6,11 +6,30 @@ from cryptography.fernet import Fernet
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet
 import bcrypt
-import os
+import plotly.express as px
 
-st.set_page_config(layout="wide")
+st.set_page_config(
+    page_title="GlucoseAI",
+    layout="wide",
+    page_icon="🩸"
+)
 
-# ------------------- SIMPLE AUTH SYSTEM -------------------
+# ---------- THEME ----------
+st.markdown("""
+<style>
+.big-title {
+    font-size:40px !important;
+    font-weight:700;
+}
+.metric-card {
+    padding:20px;
+    border-radius:15px;
+    background-color:#111827;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# ---------- SESSION STATE ----------
 if "users" not in st.session_state:
     st.session_state.users = {}
 
@@ -22,7 +41,6 @@ if "data" not in st.session_state:
         "glucose","carbs","insulin","exercise"
     ])
 
-# ------------------- ENCRYPTION -------------------
 if "key" not in st.session_state:
     st.session_state.key = Fernet.generate_key()
 
@@ -34,86 +52,94 @@ def encrypt(val):
 def decrypt(val):
     return float(cipher.decrypt(val.encode()).decode())
 
-# ------------------- LOGIN / REGISTER -------------------
-st.sidebar.title("Account")
+# ---------- AUTH ----------
+st.sidebar.title("GlucoseAI")
 
 if not st.session_state.logged_in:
-    mode = st.sidebar.radio("Select", ["Login","Register"])
+    mode = st.sidebar.radio("Account", ["Login","Register"])
     email = st.sidebar.text_input("Email")
     password = st.sidebar.text_input("Password", type="password")
 
     if mode == "Register":
-        if st.sidebar.button("Register"):
+        if st.sidebar.button("Create Account"):
             hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt())
             st.session_state.users[email] = hashed
-            st.success("Registered. Please login.")
+            st.success("Account Created")
 
     if mode == "Login":
         if st.sidebar.button("Login"):
             if email in st.session_state.users and \
                bcrypt.checkpw(password.encode(), st.session_state.users[email]):
                 st.session_state.logged_in = True
-                st.success("Logged in")
+                st.success("Welcome Back")
             else:
                 st.error("Invalid credentials")
-
     st.stop()
 
-# ------------------- MAIN DASHBOARD -------------------
-st.title("🩸 AI Diabetes Management Platform")
+# ---------- NAVIGATION ----------
+page = st.sidebar.radio("Navigation", ["Dashboard","Add Entry","Import CGM"])
 
-# ------------------- ADD ENTRY -------------------
-st.subheader("Add Entry")
+st.markdown('<p class="big-title">🩸 GlucoseAI Dashboard</p>', unsafe_allow_html=True)
 
-col1, col2 = st.columns(2)
+# ---------- ADD ENTRY ----------
+if page == "Add Entry":
 
-with col1:
-    glucose = st.number_input("Glucose (mg/dL)", min_value=0)
-    carbs = st.number_input("Carbs (g)", min_value=0)
+    st.subheader("Log New Health Data")
 
-with col2:
-    insulin = st.number_input("Insulin (units)", min_value=0)
-    exercise = st.number_input("Exercise (minutes)", min_value=0)
+    col1, col2 = st.columns(2)
 
-if st.button("Add Entry"):
-    new_row = {
-        "glucose": encrypt(glucose),
-        "carbs": encrypt(carbs),
-        "insulin": encrypt(insulin),
-        "exercise": encrypt(exercise)
-    }
-    st.session_state.data = pd.concat(
-        [st.session_state.data, pd.DataFrame([new_row])],
-        ignore_index=True
-    )
-    st.success("Entry Added")
+    with col1:
+        glucose = st.number_input("Glucose (mg/dL)", min_value=0)
+        carbs = st.number_input("Carbs (g)", min_value=0)
 
-# ------------------- CGM IMPORT -------------------
-st.subheader("Import CGM CSV")
+    with col2:
+        insulin = st.number_input("Insulin (units)", min_value=0)
+        exercise = st.number_input("Exercise (minutes)", min_value=0)
 
-uploaded_file = st.file_uploader("Upload CGM CSV")
-
-if uploaded_file:
-    df = pd.read_csv(uploaded_file)
-    if "Glucose Value (mg/dL)" in df.columns:
-        df.rename(columns={"Glucose Value (mg/dL)": "glucose"}, inplace=True)
-
-    for _, row in df.iterrows():
+    if st.button("Save Entry"):
         new_row = {
-            "glucose": encrypt(row["glucose"]),
-            "carbs": encrypt(0),
-            "insulin": encrypt(0),
-            "exercise": encrypt(0)
+            "glucose": encrypt(glucose),
+            "carbs": encrypt(carbs),
+            "insulin": encrypt(insulin),
+            "exercise": encrypt(exercise)
         }
         st.session_state.data = pd.concat(
             [st.session_state.data, pd.DataFrame([new_row])],
             ignore_index=True
         )
+        st.success("Entry Saved")
 
-    st.success("CGM Imported")
+# ---------- IMPORT CGM ----------
+if page == "Import CGM":
 
-# ------------------- ANALYTICS -------------------
-if not st.session_state.data.empty:
+    st.subheader("Upload CGM CSV")
+
+    file = st.file_uploader("Upload File")
+
+    if file:
+        df = pd.read_csv(file)
+        if "Glucose Value (mg/dL)" in df.columns:
+            df.rename(columns={"Glucose Value (mg/dL)": "glucose"}, inplace=True)
+
+        for _, row in df.iterrows():
+            new_row = {
+                "glucose": encrypt(row["glucose"]),
+                "carbs": encrypt(0),
+                "insulin": encrypt(0),
+                "exercise": encrypt(0)
+            }
+            st.session_state.data = pd.concat(
+                [st.session_state.data, pd.DataFrame([new_row])],
+                ignore_index=True
+            )
+        st.success("CGM Data Imported")
+
+# ---------- DASHBOARD ----------
+if page == "Dashboard":
+
+    if st.session_state.data.empty:
+        st.info("No data yet.")
+        st.stop()
 
     df = st.session_state.data.copy()
 
@@ -125,7 +151,6 @@ if not st.session_state.data.empty:
     avg_glucose = df["glucose"].mean()
     time_in_range = len(df[(df["glucose"] >= 70) & (df["glucose"] <= 180)]) / len(df) * 100
     hypo = len(df[df["glucose"] < 70])
-
     a1c = (avg_glucose + 46.7) / 28.7
 
     risk = 0
@@ -136,15 +161,28 @@ if not st.session_state.data.empty:
     if hypo > 3:
         risk += 30
 
-    st.subheader("📊 Metrics")
+    risk = min(risk,100)
+
+    # ---------- METRICS ----------
     col1, col2, col3, col4 = st.columns(4)
 
     col1.metric("Average Glucose", f"{avg_glucose:.1f}")
-    col2.metric("Time in Range", f"{time_in_range:.1f}%")
+    col2.metric("Time In Range", f"{time_in_range:.1f}%")
     col3.metric("Estimated A1C", f"{a1c:.2f}")
-    col4.metric("Risk Score", min(risk,100))
+    col4.metric("Risk Score", risk)
 
-    # AI Prediction
+    # Risk bar
+    st.subheader("Risk Level")
+    st.progress(risk/100)
+
+    if risk < 30:
+        st.success("Low Risk")
+    elif risk < 60:
+        st.warning("Moderate Risk")
+    else:
+        st.error("High Risk")
+
+    # ---------- AI PREDICTION ----------
     if len(df) > 5:
         X = df[["glucose","carbs","insulin","exercise"]]
         y = df["glucose"].shift(-1).dropna()
@@ -152,22 +190,28 @@ if not st.session_state.data.empty:
         model = LinearRegression()
         model.fit(X, y)
         prediction = model.predict([X.iloc[-1]])[0]
-        st.subheader("🤖 AI Prediction")
-        st.info(f"Predicted Next Glucose: {prediction:.1f}")
 
-    # Chart
-    st.line_chart(df["glucose"])
+        st.subheader("🤖 AI Glucose Prediction")
+        st.info(f"Next Estimated Glucose: {prediction:.1f} mg/dL")
 
-    # PDF Export
-    if st.button("Generate Doctor PDF"):
+    # ---------- INTERACTIVE CHART ----------
+    st.subheader("Glucose Trend")
+
+    fig = px.line(df, y="glucose", markers=True,
+                  title="Glucose Over Time",
+                  template="plotly_dark")
+    st.plotly_chart(fig, use_container_width=True)
+
+    # ---------- PDF EXPORT ----------
+    if st.button("Generate Doctor Report"):
         filename = "report.pdf"
         doc = SimpleDocTemplate(filename)
         styles = getSampleStyleSheet()
         elements = []
-        elements.append(Paragraph("Diabetes Clinical Report", styles["Title"]))
+        elements.append(Paragraph("GlucoseAI Clinical Report", styles["Title"]))
         elements.append(Spacer(1,12))
         elements.append(Paragraph(f"Average Glucose: {avg_glucose:.2f}", styles["Normal"]))
         elements.append(Paragraph(f"Estimated A1C: {a1c:.2f}", styles["Normal"]))
         elements.append(Paragraph(f"Risk Score: {risk}", styles["Normal"]))
         doc.build(elements)
-        st.success("PDF Generated (saved locally)")
+        st.success("PDF Generated")
